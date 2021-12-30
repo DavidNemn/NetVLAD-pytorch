@@ -35,7 +35,7 @@ class NetVLAD(nn.Module):
         self._init_params()
 
     def _init_params(self):
-
+        # cin cout kw kh
         self.conv.weight = nn.Parameter(
             (2.0 * self.alpha * self.centroids).unsqueeze(-1).unsqueeze(-1)
         )
@@ -44,9 +44,9 @@ class NetVLAD(nn.Module):
         )
 
     def forward(self, x):
-        # C == D  H * W == 特征数目N
-        # x = N * C * H * W 
-        N, C = x.shape[:2]
+        #   H * W == 特征数目N
+        # x = N * D * H * W 
+        B, C = x.shape[:2]
         
         if self.normalize_input:
             x = F.normalize(x, p = 2, dim = 1)  # across descriptor dim
@@ -54,20 +54,17 @@ class NetVLAD(nn.Module):
         # soft-assignment
         # 
         # (N, C, H, W) -> (N, num_clusters, H, W) -> (N, num_clusters, H * W)
-        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
+        soft_assign = self.conv(x).view(B, self.num_clusters, -1)
         
         # (N, num_clusters, H * W)
+        # N个矩阵
+        # 矩阵 K * N  每一列代表描述子 跟 K 个类的权重
         soft_assign = F.softmax(soft_assign, dim = 1)
 
         
-        x_flatten = x.view(N, C, -1) # (N, C, H, W) -> (N, C, H * W)
+        x_flatten = x.view(B, C, -1) # (N, C, H, W) -> (N, C, H * W)
         
-        # calculate residuals to each clusters
-        # 减号前面前记为a，后面记为b, residual = a - b
-        # a: (N, C, H * W) -> (num_clusters, N, C, H * W) -> (N, num_clusters, C, H * W)
-        # b: (num_clusters, C) -> (H * W, num_clusters, C) -> (num_clusters, C, H * W)
-        # residual: (N, num_clusters, C, H * W)
-        # calculate residuals to each clusters
+       
         residual = x_flatten.expand(self.num_clusters, -1, -1, -1).permute(1, 0, 2, 3) - \
             self.centroids.expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
         # soft_assign: (N, num_clusters, H * W) -> (N, num_clusters, 1, H * W)
