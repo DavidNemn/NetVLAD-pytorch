@@ -6,13 +6,13 @@ import torch.nn.functional as F
 class NetVLAD(nn.Module):
     """NetVLAD layer implementation"""
 
-    def __init__(self, num_clusters = 64, dim = 128, alpha = 100.0,
+    def __init__(self, K = 64, dim = 128, alpha = 100.0,
                  normalize_input = True):
         """
         Args:
-            num_clusters : int
+            K : int
                 The number of clusters
-            dim : int
+            D : int
                 Dimension of descriptors
             alpha : float
                 Parameter of initialization. Larger value is harder assignment.
@@ -30,8 +30,8 @@ class NetVLAD(nn.Module):
         #（batch,channel,height,width）
         # H * W 是 特征数目
         # channel 是 特征
-        self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=True)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))
+        self.conv = nn.Conv2d(dim, K, kernel_size=(1, 1), bias=True)
+        self.centroids = nn.Parameter(torch.rand(K, dim))
         self._init_params()
 
     def _init_params(self):
@@ -44,37 +44,32 @@ class NetVLAD(nn.Module):
         )
 
     def forward(self, x):
-        #   H * W == 特征数目N
-        # x = N * D * H * W 
-        B, C = x.shape[:2]
+        # 使用论文中表示
+        # H * W == N
+        # x = B * D * H * W 
+        B, D = x.shape[:2]
         
         if self.normalize_input:
             x = F.normalize(x, p = 2, dim = 1)  # across descriptor dim
 
         # soft-assignment
-        # 
-        # (N, C, H, W) -> (N, num_clusters, H, W) -> (N, num_clusters, H * W)
-        soft_assign = self.conv(x).view(B, self.num_clusters, -1)
-        
-        # (N, num_clusters, H * W)
-        # N个矩阵
-        # 矩阵 K * N  每一列代表描述子 跟 K 个类的权重
-        soft_assign = F.softmax(soft_assign, dim = 1)
 
+        soft_assign = self.conv(x).view(B, self.num_clusters, -1)
+        soft_assign = F.softmax(soft_assign, dim = 1)
         
-        x_flatten = x.view(B, C, -1) # (N, C, H, W) -> (N, C, H * W)
+
+        x_flatten = x.view(B, D, -1)
         
        
         residual = x_flatten.expand(self.num_clusters, -1, -1, -1).permute(1, 0, 2, 3) - \
             self.centroids.expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
-        # soft_assign: (N, num_clusters, H * W) -> (N, num_clusters, 1, H * W)
         residual *= soft_assign.unsqueeze(2)
       
-        # (N, num_clusters, C, H * W) * (N, num_clusters, 1, H * W)
-        vlad = residual.sum(dim = -1)  # (N, num_clusters, C, H * W) -> (N, num_clusters, C)
+
+        vlad = residual.sum(dim = -1)  
 
         vlad = F.normalize(vlad, p = 2, dim = 2)  # intra-normalization 
-        vlad = vlad.view(x.size(0), -1)  # flatten   # flatten vald: (N, num_clusters, C) -> (N, num_clusters * C)
+        vlad = vlad.view(x.size(0), -1)  # flatten   # flatten vald: 
         vlad = F.normalize(vlad, p = 2, dim = 1)  # L2 normalize
         return vlad
 
